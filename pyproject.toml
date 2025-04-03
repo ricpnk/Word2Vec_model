@@ -9,6 +9,7 @@ dependencies = [
     "gensim>=4.3.3",
     "ipykernel>=6.29.5",
     "matplotlib>=3.10.1",
+    "nltk>=3.9.1",
     "numpy>=1.26.4",
     "pandas>=2.2.3",
     "scikit-learn>=1.6.1",
