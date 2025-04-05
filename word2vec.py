@@ -100,11 +100,7 @@ def build_pairs(tokens, word_to_index, window_size=2):
 
 
 
-
-
-
-
-
+#! Evaluation
 def evaluate(model, word_to_index, index_to_word, word, topk = 10):
     model.eval() # set model to evaluation-mode
 
@@ -139,8 +135,6 @@ def train_model(model, dataloader, num_epochs, device):
                 center_batch = center_batch.to(device)  #! changed to apple gpu!!!
                 context_batch = context_batch.to(device)
 
-
-
                 optimizer.zero_grad()
                 log_probs = model(center_batch)
                 loss = loss_function(log_probs, context_batch)
@@ -164,13 +158,16 @@ def train_model(model, dataloader, num_epochs, device):
 
 
 
-
-
-
-
-
+#! Main function
 def main():
-    # check if mps is available (gpu support for apple chips)
+    #todo set the parameters
+    num_epochs = 10
+    batch_size = 1024
+    my_dim = 100
+    performance_cut = 100000
+
+
+    #todo check if mps is available (gpu support for apple chips)
     if torch.backends.mps.is_available():
         answer = input("Do you want to use apple's gpu? (y|n): ")
         if answer == "y":
@@ -182,7 +179,8 @@ def main():
 
     print(f"Using device: {device}")
 
-    # Get one of the texts
+
+    #todo text selection
     valid_input = ["imdb", "text8", "wikitext103"]
     while True:
         # text_select = input("Which dataset do you want to load? (imdb, text8, wikitext103): ")
@@ -197,34 +195,33 @@ def main():
     else:
         print("Error loading text")
 
-    # Preprocessing of the text
+
+    #todo Preprocessing of the text
     #? Machen Stopwords überhaupt Sinn wenn man Wörter mit Kontext betrachtet???
     tokens, word_to_index, index_to_word = preprocessing(dataset, stopwords, use_stopwords=False)
     
-    tokens = tokens[:100000] #! cut tokens for testing!! -> time
+    tokens = tokens[:performance_cut] #! cut tokens for testing!! -> time
 
 
-    # Build the pairs for skipgram   
+    #todo Build the pairs for skipgram   
     pairs = build_pairs(tokens, word_to_index)
     print(f"Generated {len(pairs)} training pairs.\n")
 
-    # Build a dataset for pairs
+
+    #todo Build a dataset for pairs
     dataset = SkipGramDataset(pairs)
-    dataloader = DataLoader(dataset, batch_size=1024, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size, shuffle=True)
 
 
-    # building the model
+    #todo building the model
     vocab_size = len(word_to_index)
-    my_dim = 100
-
     if device == "mps":
         model = SkipGramModel(my_dim, vocab_size).to(device) #! changed to apple gpu!!
     else:
         model = SkipGramModel(my_dim, vocab_size)
     
 
-    # train the model
-    num_epochs = 10
+    #todo train the model
     start_time = time.time()
     train_model(model, dataloader, num_epochs, device)
     stop_time = time.time()
@@ -232,8 +229,7 @@ def main():
     print(f"Model trained with {num_epochs} epochs!\n It took {result_time} seconds.\n")
 
 
-
-    # test with a user input word
+    #todo test with a user input word
     # test_word = input("Insert a word to get similarities: ").lower()
     test_word = "test"
     print("\nSimilar words:")
@@ -243,9 +239,6 @@ def main():
         similar_words = evaluate(model, word_to_index, index_to_word, test_word)
         for word, score in similar_words:
             print(f"{word}: {score}")
-
-
-
 
 
 
