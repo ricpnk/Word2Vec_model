@@ -15,6 +15,9 @@ from tqdm import tqdm
 from sklearn.manifold import TSNE
 import pandas as pd
 import time
+import os
+
+timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
 
 
 #! Classes
@@ -120,6 +123,8 @@ def evaluate(model, word_to_index, index_to_word, word, topk = 10):
 
     return similar_words
 
+
+#! Visualization
 def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
     embeddings = model.input_emb.weight.detach().cpu() #? nochmal fragen
 
@@ -130,7 +135,7 @@ def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
 
     selected_embeddings = embeddings[selected_indices]
 
-    tsne_model = TSNE(n_components=2, random_state=42, n_iter=3000, perplexity=topn) #? random_state: for reproduction of code
+    tsne_model = TSNE(n_components=2, random_state=42, max_iter=3000, perplexity=topn) #? random_state: for reproduction of code
     embeddings_2d = tsne_model.fit_transform(selected_embeddings.numpy())
 
     plt.figure(figsize=(12,10))
@@ -143,7 +148,15 @@ def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
     plt.title("t-SNE visualization of word embeddings")
     plt.xlabel("Dimension 1")
     plt.ylabel("Dimension 2")
-    plt.show()
+
+    # Save the plot
+    output_folder = f"outputs/{timestamp}"
+    os.makedirs(output_folder, exist_ok=True)
+    plot_filename = f"{output_folder}/tsne_plot_{timestamp}.png"
+
+    plt.savefig(plot_filename)
+    print(f"t-SNE plot saved to {plot_filename}")
+
 
 
 
@@ -182,17 +195,51 @@ def train_model(model, dataloader, num_epochs, device):
                 total_loss += loss.item()
             print(f"Epoch {epoch+1}/{num_epochs}, Loss: {total_loss:.4f}")
     print()
+    return total_loss / len(dataloader) # average loss per batch
 
+
+
+#! Export Outputs
+def export_output(num_epochs, batch_size, my_dim, performance_cut, use_stopwords, scatter_words, perplexity, training_time, final_loss, dataset_name, model_type="standart"):
+
+
+    filename = f"outputs/{timestamp}/output{timestamp}.txt"
+    
+
+    os.makedirs(f"outputs/{timestamp}", exist_ok=True)
+
+    content = f"""Training Output - {timestamp}
+
+Dataset: {dataset_name}
+Model Type: {model_type}
+
+Hyperparameters:
+- Number of Epochs: {num_epochs}
+- Batch Size: {batch_size}
+- Embedding Dimension: {my_dim}
+- Tokens used: {performance_cut}
+- Stopwords Removed: {use_stopwords}
+- Scatter Words (for t-SNE): {scatter_words}
+- Perplexity (for t-SNE): {perplexity}
+
+Training Results:
+- Training Time: {training_time} seconds
+- Final Loss per badge: {final_loss:.4f}
+"""
+
+    with open(filename, "w") as f:
+        f.write(content)
+    print(f"Output saved to {filename}\n")
 
 
 #! Main function
 def main():
     #todo set the parameters
-    num_epochs = 10
+    num_epochs = 5
     batch_size = 1024
     my_dim = 300
     performance_cut = 100000
-    use_stopwords = False
+    use_stopwords = True
     scatter_words = 150
     perplexity = 20
 
@@ -252,7 +299,7 @@ def main():
 
     #todo train the model
     start_time = time.time()
-    train_model(model, dataloader, num_epochs, device)
+    final_loss = train_model(model, dataloader, num_epochs, device)
     stop_time = time.time()
     result_time = int(stop_time - start_time)
     print(f"Model trained with {num_epochs} epochs!\n It took {result_time} seconds.\n")
@@ -274,7 +321,21 @@ def main():
         for word, score in similar_words:
             print(f"{word}: {score}")
 
-
+    
+    #todo input all parameters and outputs to a .txt file
+    export_output(
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        my_dim=my_dim,
+        performance_cut=performance_cut,
+        use_stopwords=use_stopwords,
+        scatter_words=scatter_words,
+        perplexity=perplexity,
+        training_time=result_time,
+        final_loss=final_loss,
+        dataset_name=text_select,
+        model_type="standard" #! or negative sampling
+    )
 
 
 
