@@ -15,6 +15,49 @@ from tqdm import tqdm
 
 
 
+class SkipGramDataset(torch.utils.data.Dataset):
+
+    def __init__(self, pairs):
+        self.pairs = pairs
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx):
+        center, context = self.pairs[idx]
+        return torch.tensor(center, dtype=torch.long), torch.tensor(context, dtype=torch.long)
+
+
+
+#! SkipGram Modell architecture:
+#todo Eingabe: Index des Center-Worts
+#todo Erzeuge: Embedding-Vektor für das Center-Wort
+#todo Vergleiche: Mit allen Kontext-Embeddings (Dot-Produkt)
+#todo Berechne: Wahrscheinlichkeiten (Softmax)
+#todo Loss: Cross-Entropy
+
+class SkipGramModel(nn.Module):
+
+    def __init__(self, my_dim, vocab_size):
+        super(SkipGramModel, self).__init__()
+        self.input_emb = nn.Embedding(vocab_size, my_dim)
+        self.output_emb = nn.Embedding(vocab_size, my_dim)
+
+        def forward(self, center_words):
+            center_emb = self.input_emb(center_words)
+            scores = torch.matmul(center_emb, self.output_emb.weight.t())
+
+            log_probs = F.log_softmax(scores, dim=1)
+
+            return log_probs
+
+
+
+
+
+
+
+
 def load_text(selection):
     if selection == "imdb":
         text = datasets.load_dataset("stanfordnlp/imdb")
@@ -88,12 +131,28 @@ def main():
         print("Error loading text")
 
     # Preprocessing of the text
+    #? Machen Stopwords überhaupt Sinn wenn man Wörter mit Kontext betrachtet???
     tokens, word_to_index, index_to_word = preprocessing(dataset, stopwords)
     
-
     # Build the pairs for skipgram   
     pairs = build_pairs(tokens, word_to_index)
     print(f"Generated {len(pairs)} training pairs.")
+
+    # Build a dataset for pairs
+    dataset = SkipGramDataset(pairs)
+    dataloader = DataLoader(dataset, batch_size=128, shuffle=True)
+    print(f"Dataset size: {len(dataset)} samples.")
+
+
+
+
+
+
+
+
+
+
+
 
 
 
