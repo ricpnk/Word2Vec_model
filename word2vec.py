@@ -12,6 +12,8 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from collections import Counter
 from tqdm import tqdm
+from sklearn.manifold import TSNE
+import pandas as pd
 import time
 
 
@@ -118,6 +120,31 @@ def evaluate(model, word_to_index, index_to_word, word, topk = 10):
 
     return similar_words
 
+def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
+    embeddings = model.input_emb.weight.detach().cpu() #? nochmal fragen
+
+    if num_words < len(word_to_index):
+        selected_indices = list(range(num_words))
+    else:
+        selected_indices = list(range(len(word_to_index)))
+
+    selected_embeddings = embeddings[selected_indices]
+
+    tsne_model = TSNE(n_components=2, random_state=42, n_iter=3000, perplexity=topn) #? random_state: for reproduction of code
+    embeddings_2d = tsne_model.fit_transform(selected_embeddings.numpy())
+
+    plt.figure(figsize=(12,10))
+    for i, label in enumerate(selected_indices):
+        x, y = embeddings_2d[i, 0], embeddings_2d[i, 1]
+        plt.scatter(x, y)
+        if label in index_to_word:
+            plt.annotate(index_to_word[label], (x, y), textcoords="offset points", xytext=(2,2), ha='right', fontsize=8)
+
+    plt.title("t-SNE visualization of word embeddings")
+    plt.xlabel("Dimension 1")
+    plt.ylabel("Dimension 2")
+    plt.show()
+
 
 
 
@@ -163,8 +190,11 @@ def main():
     #todo set the parameters
     num_epochs = 10
     batch_size = 1024
-    my_dim = 100
+    my_dim = 300
     performance_cut = 100000
+    use_stopwords = False
+    scatter_words = 150
+    perplexity = 20
 
 
     #todo check if mps is available (gpu support for apple chips)
@@ -178,7 +208,6 @@ def main():
         device = torch.device("cpu")
 
     print(f"Using device: {device}")
-
 
     #todo text selection
     valid_input = ["imdb", "text8", "wikitext103"]
@@ -198,7 +227,7 @@ def main():
 
     #todo Preprocessing of the text
     #? Machen Stopwords überhaupt Sinn wenn man Wörter mit Kontext betrachtet???
-    tokens, word_to_index, index_to_word = preprocessing(dataset, stopwords, use_stopwords=False)
+    tokens, word_to_index, index_to_word = preprocessing(dataset, stopwords, use_stopwords)
     
     tokens = tokens[:performance_cut] #! cut tokens for testing!! -> time
 
@@ -229,7 +258,12 @@ def main():
     print(f"Model trained with {num_epochs} epochs!\n It took {result_time} seconds.\n")
 
 
+    #todo t-sne visualization
+    tsne_scatterplot(model, word_to_index, index_to_word, scatter_words, perplexity)
+
+
     #todo test with a user input word
+    #! implement a loop for endless inputting
     # test_word = input("Insert a word to get similarities: ").lower()
     test_word = "test"
     print("\nSimilar words:")
@@ -239,6 +273,7 @@ def main():
         similar_words = evaluate(model, word_to_index, index_to_word, test_word)
         for word, score in similar_words:
             print(f"{word}: {score}")
+
 
 
 
