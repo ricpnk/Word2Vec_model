@@ -18,8 +18,16 @@ import time
 import os
 import gensim
 from gensim.models import KeyedVectors
+import random
 
 timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+
+#! Set the random seed for reproducibility
+def set_seed(seed):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
 
 
 #! Classes
@@ -35,20 +43,36 @@ class SkipGramDataset(torch.utils.data.Dataset):
         center, context = self.pairs[idx]
         return torch.tensor(center, dtype=torch.long), torch.tensor(context, dtype=torch.long)
 
-#todo Loss: Cross-Entropy
+
 class SkipGramModel(nn.Module):
 
-    def __init__(self, my_dim, vocab_size):
+    def __init__(self, my_dim, vocab_size, device):
         super(SkipGramModel, self).__init__()
-        self.input_emb = nn.Embedding(vocab_size, my_dim) # every word gets a vector with size my_dim
-        self.output_emb = nn.Embedding(vocab_size, my_dim) # train on different embeddings to differentiate between representations
+        self.input_emb = nn.Embedding(vocab_size, my_dim, device=device) # every word gets a vector with size my_dim
+        self.output_emb = nn.Embedding(vocab_size, my_dim, device=device) # train on different embeddings to differentiate between representations
 
     def forward(self, center_words):
         center_emb = self.input_emb(center_words) # get the matrix with all the embeddings for center_words (dim: batch_size, my_dim)
+        context_emb = self.output_emb.weight # get the matrix with all the embeddings for context_words (dim: vocab_size, my_dim)
         #? Calculate a score for every center word, with every word in the vocab
-        scores = torch.matmul(center_emb, self.output_emb.weight.t()) # dot product multiply both matrixes and .t() transponse
+        scores = torch.matmul(center_emb, context_emb.t()) # dot product multiply both matrixes and .t() transponse
         return scores
+    
 
+class SkipGramModelNegativeSampling(nn.Module):
+    def __init__(self, my_dim, vocab_size, device):
+        super(SkipGramModelNegativeSampling, self).__init__()
+        self.input_emb = nn.Embedding(vocab_size, my_dim, device=device)
+        self.output_emb = nn.Embedding(vocab_size, my_dim, device=device)
+
+    def forward(self, center_words, pos_words, neg_words):
+        center_emb = self.input_emb(center_words)
+        pos_emb = self.output_emb(pos_words)
+        neg_emb = self.output_emb(neg_words)
+        # Calculate scores for positive and negative samples difference to the original SkipGramModel
+        pos_scores = torch.sum(center_emb * pos_emb, dim=1)
+        neg_scores = torch.bmm(neg_emb, center_emb.unsqueeze(2)).squeeze() # (batch_size, num_neg_samples)
+        return pos_scores, neg_scores
 
 
 
@@ -132,7 +156,7 @@ def evaluate_gensim(model, index_to_word):
             print(f"\nWord: {word}\nMost similar words:")
             similar_words = gensim_model.most_similar(word, topn=5)
             for word, score in similar_words:
-                print(f"{word}: {score:.2f}")
+                print(f"{word}: {score:.4f}")
         else:
             print(f"Error: {word} not in vocabulary!")
 
@@ -185,6 +209,7 @@ def train_model(model, dataloader, num_epochs, device):
 
     for epoch in range(num_epochs):
         total_loss = 0
+        model.train() # set model to training-mode
 
         if device == "mps":
             for center_batch, context_batch in dataloader:
@@ -197,18 +222,54 @@ def train_model(model, dataloader, num_epochs, device):
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
-            print(f"Epoch {epoch+1}/{num_epochs}, Loss per badge: {(total_loss / len(dataloader))}")
+            avg_loss = total_loss / len(dataloader) # average loss per batch
+            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
         else:
             for center_batch, context_batch in dataloader:
-                optimizer.zero_grad()
+                optimizer.zero_grad() 
                 log_probs = model(center_batch)
                 loss = loss_function(log_probs, context_batch)
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
-            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {(total_loss / len(dataloader))}")
+            avg_loss = total_loss / len(dataloader) # average loss per batch
+            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
     print()
-    return total_loss / len(dataloader) # average loss per batch
+    return avg_loss 
+
+def train_model_negative_sampling(model, dataloader, num_epochs, device, vocab_size, num_negatives=5):
+    loss_function = nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.003)
+
+    for epoch in range(num_epochs):
+        total_loss = 0
+        model.train()
+
+        for center_batch, pos_context_batch in tqdm(dataloader):
+            center_batch = center_batch.to(device)
+            pos_context_batch = pos_context_batch.to(device)
+
+            batch_size = center_batch.size(0)
+
+            neg_context_batch = torch.randint(0, vocab_size, (batch_size, num_negatives)).to(device)
+            optimizer.zero_grad()
+            pos_score, neg_score = model(center_batch, pos_context_batch, neg_context_batch)
+
+            pos_labels = torch.ones_like(pos_score)
+            neg_labels = torch.zeros_like(neg_score)
+
+            loss_pos = loss_function(pos_score, pos_labels)
+            loss_neg = loss_function(neg_score, neg_labels)
+
+            loss = loss_pos + loss_neg
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
+    print()
+    return avg_loss
 
 
 
@@ -222,7 +283,7 @@ def export_output(num_epochs,
                   training_time, 
                   final_loss, 
                   dataset_name, 
-                  model_type="standart"):
+                  model_type):
 
     filename = f"outputs/{timestamp}/output{timestamp}.txt"
     os.makedirs(f"outputs/{timestamp}", exist_ok=True)
@@ -256,21 +317,32 @@ Training Results:
 
 #! Main function
 def main():
+    set_seed(42)
     #todo set the parameters
-    model_type = "standard" # or negative sampling
-    num_epochs = 5
+    model_type = "standard" # or negative_sampling
+    num_epochs = 20
     batch_size = 1024
     my_dim = 300
-    performance_cut = 100000 # len of the training words
+    performance_cut = 500000 # len of the training words
     use_stopwords = True
     # visualisation parameters
     scatter_words = 150
     perplexity = 20
 
+    #todo user input for model type
+    mode_input = input("Which model do you want to use? (standard = 0, negative_sampling = 1): ")
+    if mode_input == "0":
+        model_type = "standard"
+    elif mode_input == "1":
+        model_type = "negative_sampling"
+    else:
+        print("Not a valid input. Using standard model.\n")
+        model_type = "standard"
+
 
     #todo check if mps is available (gpu support for apple chips)
     if torch.backends.mps.is_available():
-        answer = input("Do you want to use apple's gpu? (y|n): ")
+        answer = input("Do you want to use apple's gpu chip? (y|n): ")
         if answer == "y":
             device = torch.device("mps")
         else:
@@ -279,6 +351,7 @@ def main():
         device = torch.device("cpu")
 
     print(f"Using device: {device}")
+
 
 
     #todo text selection
@@ -298,7 +371,7 @@ def main():
 
 
     #todo Preprocessing of the text
-    #? Machen Stopwords überhaupt Sinn wenn man Wörter mit Kontext betrachtet???
+    #? Is using sotpwords necessary for SkipGram?
     tokens, word_to_index, index_to_word = preprocessing(dataset, stopwords, use_stopwords)
     
     tokens = tokens[:performance_cut] #! cut tokens for testing!! -> time
@@ -316,18 +389,26 @@ def main():
 
     #todo building the model
     vocab_size = len(word_to_index)
-    if device == "mps":
-        model = SkipGramModel(my_dim, vocab_size).to(device) #! changed to apple gpu!!
-    else:
-        model = SkipGramModel(my_dim, vocab_size)
+    if model_type == "standard":
+        model = SkipGramModel(my_dim, vocab_size, device).to(device)
+    elif model_type == "negative_sampling":
+        model = SkipGramModelNegativeSampling(my_dim, vocab_size, device).to(device)
+
     
 
     #todo train the model
-    start_time = time.time()
-    final_loss = train_model(model, dataloader, num_epochs, device)
-    stop_time = time.time()
-    result_time = int(stop_time - start_time)
-    print(f"Model trained with {num_epochs} epochs!\n It took {result_time} seconds.\n")
+    if model_type == "standard":
+        start_time = time.time()
+        final_loss = train_model(model, dataloader, num_epochs, device)
+        stop_time = time.time()
+        result_time = int(stop_time - start_time)
+        print(f"Model used standard sampling and trained with {num_epochs} epochs!\n It took {result_time} seconds.\n")
+    else:
+        start_time = time.time()
+        final_loss = train_model_negative_sampling(model, dataloader, num_epochs, device, vocab_size)
+        stop_time = time.time()
+        result_time = int(stop_time - start_time)
+        print(f"Model used negative sampling and trained with {num_epochs} epochs!\n It took {result_time} seconds.\n")
 
 
     #todo t-sne visualization
@@ -361,7 +442,7 @@ def main():
         training_time=result_time,
         final_loss=final_loss,
         dataset_name=text_select,
-        model_type="standard" #! or negative sampling
+        model_type=model_type
     )
 
 
