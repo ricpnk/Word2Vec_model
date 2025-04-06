@@ -16,6 +16,8 @@ from sklearn.manifold import TSNE
 import pandas as pd
 import time
 import os
+import gensim
+from gensim.models import KeyedVectors
 
 timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
 
@@ -43,12 +45,9 @@ class SkipGramModel(nn.Module):
 
     def forward(self, center_words):
         center_emb = self.input_emb(center_words) # get the matrix with all the embeddings for center_words (dim: batch_size, my_dim)
-        #? Calculate a score for every word in the vocab
+        #? Calculate a score for every center word, with every word in the vocab
         scores = torch.matmul(center_emb, self.output_emb.weight.t()) # dot product multiply both matrixes and .t() transponse
-        #? calculates log-softmax for every score
-        log_probs = F.log_softmax(scores, dim=1) # dim=1: every row | "log" because of .NLLLoss() we need log there
-
-        return log_probs
+        return scores
 
 
 
@@ -108,20 +107,38 @@ def build_pairs(tokens, word_to_index, window_size=2):
 #! Evaluation
 def evaluate(model, word_to_index, index_to_word, word, topk = 10):
     model.eval() # set model to evaluation-mode
-
     embeddings = model.input_emb.weight.detach().cpu()
-
     word_idx = word_to_index[word]
     word_emb = embeddings[word_idx]
-
     similarities = F.cosine_similarity(word_emb.unsqueeze(0), embeddings, dim=1)
-
     topk_sim = torch.topk(similarities, k=topk + 1) # +1 cause of word itself
     top_idx = topk_sim.indices[1:]
-
     similar_words = [(index_to_word[idx.item()], similarities[idx].item()) for idx in top_idx]
 
     return similar_words
+
+def evaluate_gensim(model, index_to_word):
+    model.eval()
+    print("Gensim evaluation:")
+    embeddings = model.input_emb.weight.detach().cpu().numpy() # .weight: gets parameter | .detach(): cuts the tensor from comp | .cpu: copy's tensor to cpu from gpu | .numpy(): changes tensor to numpy array
+    gensim_model = KeyedVectors(vector_size=embeddings.shape[1]) # create a empty KeyedVectors object for gensim
+    vocab_list = [index_to_word[i] for i in range(len(index_to_word))] # build a vocab list
+    gensim_model.add_vectors(vocab_list, embeddings) # add vectors to gensim model
+
+    # testing on some words
+    test_words = ["king", "queen", "war"]
+    for word in test_words:
+        if word in gensim_model:
+            print(f"\nWord: {word}\nMost similar words:")
+            similar_words = gensim_model.most_similar(word, topn=5)
+            for word, score in similar_words:
+                print(f"{word}: {score:.2f}")
+        else:
+            print(f"Error: {word} not in vocabulary!")
+
+
+
+
 
 
 #! Visualization
@@ -155,8 +172,7 @@ def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
     plot_filename = f"{output_folder}/tsne_plot_{timestamp}.png"
 
     plt.savefig(plot_filename)
-    print(f"t-SNE plot saved to {plot_filename}")
-
+    print(f"t-SNE plot saved to {plot_filename}\n")
 
 
 
@@ -164,7 +180,7 @@ def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
 #! Training
 def train_model(model, dataloader, num_epochs, device):
     # Define loss and optimizer
-    loss_function = nn.NLLLoss()
+    loss_function = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.003)
 
     for epoch in range(num_epochs):
@@ -180,10 +196,8 @@ def train_model(model, dataloader, num_epochs, device):
                 loss = loss_function(log_probs, context_batch)
                 loss.backward()
                 optimizer.step()
-
                 total_loss += loss.item()
-
-            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {total_loss:.4f}")
+            print(f"Epoch {epoch+1}/{num_epochs}, Loss per badge: {(total_loss / len(dataloader))}")
         else:
             for center_batch, context_batch in dataloader:
                 optimizer.zero_grad()
@@ -191,23 +205,27 @@ def train_model(model, dataloader, num_epochs, device):
                 loss = loss_function(log_probs, context_batch)
                 loss.backward()
                 optimizer.step()
-
                 total_loss += loss.item()
-            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {total_loss:.4f}")
+            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {(total_loss / len(dataloader))}")
     print()
     return total_loss / len(dataloader) # average loss per batch
 
 
 
-#! Export Outputs
-def export_output(num_epochs, batch_size, my_dim, performance_cut, use_stopwords, scatter_words, perplexity, training_time, final_loss, dataset_name, model_type="standart"):
 
+#! Export Outputs
+def export_output(num_epochs, 
+                  batch_size, 
+                  my_dim, performance_cut, 
+                  use_stopwords, scatter_words, 
+                  perplexity, 
+                  training_time, 
+                  final_loss, 
+                  dataset_name, 
+                  model_type="standart"):
 
     filename = f"outputs/{timestamp}/output{timestamp}.txt"
-    
-
     os.makedirs(f"outputs/{timestamp}", exist_ok=True)
-
     content = f"""Training Output - {timestamp}
 
 Dataset: {dataset_name}
@@ -229,17 +247,23 @@ Training Results:
 
     with open(filename, "w") as f:
         f.write(content)
-    print(f"Output saved to {filename}\n")
+    print(f"\nOutput saved to {filename}\n")
+
+
+
+
 
 
 #! Main function
 def main():
     #todo set the parameters
+    model_type = "standard" # or negative sampling
     num_epochs = 5
     batch_size = 1024
     my_dim = 300
-    performance_cut = 100000
+    performance_cut = 100000 # len of the training words
     use_stopwords = True
+    # visualisation parameters
     scatter_words = 150
     perplexity = 20
 
@@ -255,6 +279,7 @@ def main():
         device = torch.device("cpu")
 
     print(f"Using device: {device}")
+
 
     #todo text selection
     valid_input = ["imdb", "text8", "wikitext103"]
@@ -310,16 +335,18 @@ def main():
 
 
     #todo test with a user input word
-    #! implement a loop for endless inputting
-    # test_word = input("Insert a word to get similarities: ").lower()
-    test_word = "test"
-    print("\nSimilar words:")
-    if test_word not in word_to_index:
-        print("Word not in vocabulary!")
-    else:
-        similar_words = evaluate(model, word_to_index, index_to_word, test_word)
-        for word, score in similar_words:
-            print(f"{word}: {score}")
+    evaluate_gensim(model, index_to_word)
+
+    # #! implement a loop for endless inputting
+    # # test_word = input("Insert a word to get similarities: ").lower()
+    # test_word = "king"
+    # print("\nSimilar words (to king):")
+    # if test_word not in word_to_index:
+    #     print("Word not in vocabulary!")
+    # else:
+    #     similar_words = evaluate(model, word_to_index, index_to_word, test_word)
+    #     for word, score in similar_words:
+    #         print(f"{word}: {score}")
 
     
     #todo input all parameters and outputs to a .txt file
