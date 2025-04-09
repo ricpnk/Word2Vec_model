@@ -4,8 +4,10 @@ Project Description
 
 This project is part of the Natural Language Processing course.
 The task was to implement a custom Word2Vec model with two training methods:
-	•	Standard Skip-Gram model (with Softmax)
-	•	Skip-Gram model with Negative Sampling
+
+* Jupyter Notebook to explore the Gensim library and its Word2Vec implementation.
+* Standard Skip-Gram model (with Softmax)
+* Skip-Gram model with Negative Sampling
 
 Additionally, the project includes functions for evaluating and visualizing the trained word embeddings.
 
@@ -62,10 +64,9 @@ Features
 - Device selection (CPU or Apple MPS GPU)
 - Configurable hyperparameters (embedding dimension, batch size, number of epochs)
 - Evaluation
-- Custom implementation of Cosine Similarity evaluation
 - Integration of trained embeddings into Gensim for using the .most_similar() API
 - Visualization
-- Generation of 2D t-SNE plots of the learned word embeddings
+- Generation of 2D t-SNE plots of the learned word embeddings (made my own function for better visualization)
 - Saving plots into an output directory
 - Automatic saving of major training results, hyperparameters, and visualizations with timestamps
 

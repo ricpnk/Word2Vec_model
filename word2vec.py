@@ -1,7 +1,6 @@
 import nltk
 from nltk.corpus import stopwords
 import datasets
-from datasets import DatasetDict
 import re
 import string
 import matplotlib.pyplot as plt
@@ -69,7 +68,7 @@ class SkipGramModelNegativeSampling(nn.Module):
         center_emb = self.input_emb(center_words)
         pos_emb = self.output_emb(pos_words)
         neg_emb = self.output_emb(neg_words)
-        # Calculate scores for positive and negative samples difference to the original SkipGramModel
+        #? Calculate scores for positive and negative samples difference to the original SkipGramModel
         pos_scores = torch.sum(center_emb * pos_emb, dim=1)
         neg_scores = torch.bmm(neg_emb, center_emb.unsqueeze(2)).squeeze() # (batch_size, num_neg_samples)
         return pos_scores, neg_scores
@@ -129,18 +128,6 @@ def build_pairs(tokens, word_to_index, window_size=2):
 
 
 #! Evaluation
-def evaluate(model, word_to_index, index_to_word, word, topk = 10):
-    model.eval() # set model to evaluation-mode
-    embeddings = model.input_emb.weight.detach().cpu()
-    word_idx = word_to_index[word]
-    word_emb = embeddings[word_idx]
-    similarities = F.cosine_similarity(word_emb.unsqueeze(0), embeddings, dim=1)
-    topk_sim = torch.topk(similarities, k=topk + 1) # +1 cause of word itself
-    top_idx = topk_sim.indices[1:]
-    similar_words = [(index_to_word[idx.item()], similarities[idx].item()) for idx in top_idx]
-
-    return similar_words
-
 def evaluate_gensim(model, index_to_word):
     model.eval()
     print("Gensim evaluation:")
@@ -166,8 +153,9 @@ def evaluate_gensim(model, index_to_word):
 
 
 #! Visualization
-def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
-    embeddings = model.input_emb.weight.detach().cpu() #? nochmal fragen
+def tsne_scatterplot(model, word_to_index, index_to_word, num_words, perplexity_value):
+    model.eval()
+    embeddings = model.input_emb.weight.detach().cpu()
 
     if num_words < len(word_to_index):
         selected_indices = list(range(num_words))
@@ -176,7 +164,7 @@ def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
 
     selected_embeddings = embeddings[selected_indices]
 
-    tsne_model = TSNE(n_components=2, random_state=42, max_iter=3000, perplexity=topn) #? random_state: for reproduction of code
+    tsne_model = TSNE(n_components=2, random_state=42, max_iter=3000, perplexity=perplexity_value) #? random_state: for reproduction of code
     embeddings_2d = tsne_model.fit_transform(selected_embeddings.numpy())
 
     plt.figure(figsize=(12,10))
@@ -187,8 +175,8 @@ def tsne_scatterplot(model, word_to_index, index_to_word, num_words, topn):
             plt.annotate(index_to_word[label], (x, y), textcoords="offset points", xytext=(2,2), ha='right', fontsize=8)
 
     plt.title("t-SNE visualization of word embeddings")
-    plt.xlabel("Dimension 1")
-    plt.ylabel("Dimension 2")
+    plt.xlabel("X")
+    plt.ylabel("Y")
 
     # Save the plot
     output_folder = f"outputs/{timestamp}"
@@ -211,34 +199,24 @@ def train_model(model, dataloader, num_epochs, device):
         total_loss = 0
         model.train() # set model to training-mode
 
-        if device == "mps":
-            for center_batch, context_batch in dataloader:
-                center_batch = center_batch.to(device)  #! changed to apple gpu!!!
-                context_batch = context_batch.to(device)
+        for center_batch, context_batch in tqdm(dataloader):
+            center_batch = center_batch.to(device)  #! changed to apple gpu!!!
+            context_batch = context_batch.to(device)
 
-                optimizer.zero_grad()
-                log_probs = model(center_batch)
-                loss = loss_function(log_probs, context_batch)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-            avg_loss = total_loss / len(dataloader) # average loss per batch
-            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
-        else:
-            for center_batch, context_batch in dataloader:
-                optimizer.zero_grad() 
-                log_probs = model(center_batch)
-                loss = loss_function(log_probs, context_batch)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item()
-            avg_loss = total_loss / len(dataloader) # average loss per batch
-            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
+            optimizer.zero_grad()
+            probs = model(center_batch)
+            loss = loss_function(probs, context_batch)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        avg_loss = total_loss / len(dataloader) # average loss per batch
+        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
     print()
     return avg_loss 
 
+
 def train_model_negative_sampling(model, dataloader, num_epochs, device, vocab_size, num_negatives=5):
-    loss_function = nn.BCEWithLogitsLoss()
+    loss_function = nn.BCEWithLogitsLoss() #! changed to binary cross entropy
     optimizer = torch.optim.Adam(model.parameters(), lr=0.003)
 
     for epoch in range(num_epochs):
@@ -318,16 +296,18 @@ Training Results:
 #! Main function
 def main():
     set_seed(42)
+
+
     #todo set the parameters
     model_type = "standard" # or negative_sampling
-    num_epochs = 20
+    num_epochs = 5
     batch_size = 1024
     my_dim = 300
-    performance_cut = 500000 # len of the training words
+    performance_cut = 100000  # len of the training words
     use_stopwords = True
     # visualisation parameters
-    scatter_words = 150
-    perplexity = 20
+    scatter_words = 200
+    perplexity = 25
 
     #todo user input for model type
     mode_input = input("Which model do you want to use? (standard = 0, negative_sampling = 1): ")
@@ -371,11 +351,10 @@ def main():
 
 
     #todo Preprocessing of the text
-    #? Is using sotpwords necessary for SkipGram?
+    #? Is using stopwords necessary for SkipGram?
     tokens, word_to_index, index_to_word = preprocessing(dataset, stopwords, use_stopwords)
     
     tokens = tokens[:performance_cut] #! cut tokens for testing!! -> time
-
 
     #todo Build the pairs for skipgram   
     pairs = build_pairs(tokens, word_to_index)
@@ -403,12 +382,14 @@ def main():
         stop_time = time.time()
         result_time = int(stop_time - start_time)
         print(f"Model used standard sampling and trained with {num_epochs} epochs!\n It took {result_time} seconds.\n")
-    else:
+    elif model_type == "negative_sampling":
         start_time = time.time()
         final_loss = train_model_negative_sampling(model, dataloader, num_epochs, device, vocab_size)
         stop_time = time.time()
         result_time = int(stop_time - start_time)
         print(f"Model used negative sampling and trained with {num_epochs} epochs!\n It took {result_time} seconds.\n")
+    else:
+        print("Error: Model type not recognized.")
 
 
     #todo t-sne visualization
@@ -417,17 +398,6 @@ def main():
 
     #todo test with a user input word
     evaluate_gensim(model, index_to_word)
-
-    # #! implement a loop for endless inputting
-    # # test_word = input("Insert a word to get similarities: ").lower()
-    # test_word = "king"
-    # print("\nSimilar words (to king):")
-    # if test_word not in word_to_index:
-    #     print("Word not in vocabulary!")
-    # else:
-    #     similar_words = evaluate(model, word_to_index, index_to_word, test_word)
-    #     for word, score in similar_words:
-    #         print(f"{word}: {score}")
 
     
     #todo input all parameters and outputs to a .txt file
