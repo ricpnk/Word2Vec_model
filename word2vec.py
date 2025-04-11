@@ -130,8 +130,6 @@ def main():
     model_save_path = f"{model_directory}/trained_model_{timestamp}.pt"
 
     os.makedirs(model_directory, exist_ok=True)
-    with open(f"{model_directory}/word_to_index.pkl", "wb") as f:
-        pickle.dump(word_to_index, f)
     with open(f"{model_directory}/index_to_word.pkl", "wb") as f:
         pickle.dump(index_to_word, f)
     torch.save(model.state_dict(), model_save_path)
