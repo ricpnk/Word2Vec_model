@@ -61,14 +61,15 @@ Features
 - Training Word2Vec models
 - Choice between Standard Skip-Gram and Negative Sampling
 - Use of text datasets (imdb, text8, wikitext103)
-- Device selection (CPU or Apple MPS GPU)
+- Device selection (CPU, Cuda or Apple MPS GPU)
 - Configurable hyperparameters (embedding dimension, batch size, number of epochs)
 - Evaluation
 - Integration of trained embeddings into Gensim for using the .most_similar() API
 - Visualization
 - Generation of 2D t-SNE plots of the learned word embeddings (made my own function for better visualization)
 - Saving plots into an output directory
-- Automatic saving of major training results, hyperparameters, and visualizations with timestamps
+- Automatic saving of model, major training results, hyperparameters, and visualizations with timestamps
+- Testing the best model with various inputs
 
 ⸻
 
@@ -76,8 +77,10 @@ Project Files
 
 File	Description:
 
-- **word_embeddings.ipynb**:     The first part of the assignment, which includes some gensim exercises.
+- **word_embeddings.ipynb:**     The first part of the assignment, which includes some gensim exercises.
 - **word2vec.py:** 	             Main file containing training, evaluation, and visualization logic.
-- **outputs/:** 	             Directory where all results (plots, training logs) are automatically stored.
+- **testmodel.py:**              Test file for the best model.
+- **outputs/:** 	             Directory where all results (model, plots, training logs) are automatically stored.
+- **bestmodel/:**                Directory where the best model is stored.
 - **.venv/:** 	                 Virtual environment directory (locally created, not part of the repository).
 
