@@ -1,0 +1,17 @@
+Training Output - 2025-04-11_03-42-36
+
+Dataset: text8
+Model Type: negative_sampling
+
+Hyperparameters:
+- Number of Epochs: 30
+- Batch Size: 8192
+- Embedding Dimension: 300
+- Tokens used: 5000000
+- Stopwords Removed: True
+- Scatter Words (for t-SNE): 500
+- Perplexity (for t-SNE): 35
+
+Training Results:
+- Training Time: 36317 seconds
+- Final Loss per badge: 0.5357
